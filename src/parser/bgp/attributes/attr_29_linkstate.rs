@@ -409,7 +409,7 @@ fn parse_ip_prefix_from_bytes(data: &[u8]) -> Result<NetworkPrefix, ParserError>
 
         let ipnet = ipnet::Ipv4Net::new(addr, prefix_len)
             .map_err(|_| ParserError::ParseError("Invalid IPv4 prefix".to_string()))?;
-        Ok(NetworkPrefix::new(ipnet::IpNet::V4(ipnet), None))
+        Ok(NetworkPrefix::new(ipnet::IpNet::V4(ipnet), None, None))
     } else {
         // IPv6 prefix
         let needed_bytes = prefix_len.div_ceil(8) as usize;
@@ -427,7 +427,7 @@ fn parse_ip_prefix_from_bytes(data: &[u8]) -> Result<NetworkPrefix, ParserError>
 
         let ipnet = ipnet::Ipv6Net::new(addr, prefix_len)
             .map_err(|_| ParserError::ParseError("Invalid IPv6 prefix".to_string()))?;
-        Ok(NetworkPrefix::new(ipnet::IpNet::V6(ipnet), None))
+        Ok(NetworkPrefix::new(ipnet::IpNet::V6(ipnet), None, None))
     }
 }
 

@@ -101,7 +101,7 @@ impl MrtRibEncoder {
             let mut prefix_rib_entry = RibAfiEntries {
                 rib_type,
                 sequence_number: entry_count as u32,
-                prefix: NetworkPrefix::new(*prefix, None),
+                prefix: NetworkPrefix::new(*prefix, None, None),
                 rib_entries: vec![],
             };
             for entry in entries_map.values() {

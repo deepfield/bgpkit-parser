@@ -16,6 +16,10 @@ use log::debug;
 use regex::Regex;
 use std::net::IpAddr;
 
+const MPLS_LABEL_BITS: u8 = 24;
+const RD_BITS: u8 = 64;
+const RD_BYTES: usize = 8;
+
 impl ReadUtils for Bytes {}
 
 // Allow reading IPs from Reads
@@ -207,7 +211,98 @@ pub trait ReadUtils: Buf {
             }
         };
 
-        Ok(NetworkPrefix::new(prefix, path_id))
+        Ok(NetworkPrefix::new(prefix, path_id, None))
+    }
+
+    /// Read VPN-IPv4 or VPN-IPv6 NLRI prefix (SAFI 128 - MPLS-labeled VPN).
+    ///
+    /// Per RFC 4364 Section 4.2, VPN NLRI contains:
+    /// - MPLS label stack (3 bytes per label, typically 1-2 labels)
+    /// - Route Distinguisher (8 bytes)
+    /// - IP prefix (variable)
+    ///
+    /// The length field indicates total bits including label(s) + RD + prefix.
+    fn read_vpn_nlri_prefix(
+        &mut self,
+        afi: &Afi,
+        add_path: bool,
+    ) -> Result<NetworkPrefix, ParserError> {
+        let path_id = if add_path {
+            Some(self.read_u32()?)
+        } else {
+            None
+        };
+
+        // Total length in bits (includes MPLS label + RD + prefix)
+        let total_bit_len = self.read_u8()?;
+
+        // For VPN routes, we expect at least label (24 bits) + RD (64 bits) = 88 bits minimum
+        if total_bit_len < MPLS_LABEL_BITS + RD_BITS {
+            return Err(ParserError::ParseError(format!(
+                "VPN NLRI too short: {} bits, expected at least {} bits",
+                total_bit_len,
+                MPLS_LABEL_BITS + RD_BITS
+            )));
+        }
+
+        // Skip MPLS label (3 bytes = 24 bits)
+        // We don't store the label, but we need to consume it
+        self.has_n_remaining(3)?;
+        let _label_bytes = self.copy_to_bytes(3);
+
+        // Read Route Distinguisher (8 bytes = 64 bits)
+        self.has_n_remaining(RD_BYTES)?;
+        let mut rd_bytes = [0u8; 8];
+        self.copy_to_slice(&mut rd_bytes);
+        let rd = RouteDistinguisher(rd_bytes);
+
+        // Calculate IP prefix length: total - label (24) - RD (64)
+        let ip_bit_len = total_bit_len - MPLS_LABEL_BITS - RD_BITS;
+        let ip_byte_len: usize = (ip_bit_len as usize).div_ceil(8);
+
+        let addr: IpAddr = match afi {
+            Afi::Ipv4 => {
+                if ip_byte_len > 4 {
+                    return Err(ParserError::ParseError(format!(
+                        "Invalid VPN-IPv4 prefix length: {} bits",
+                        ip_bit_len
+                    )));
+                }
+                self.has_n_remaining(ip_byte_len)?;
+                let mut buff = [0; 4];
+                self.copy_to_slice(&mut buff[..ip_byte_len]);
+                IpAddr::V4(Ipv4Addr::from(buff))
+            }
+            Afi::Ipv6 => {
+                if ip_byte_len > 16 {
+                    return Err(ParserError::ParseError(format!(
+                        "Invalid VPN-IPv6 prefix length: {} bits",
+                        ip_bit_len
+                    )));
+                }
+                self.has_n_remaining(ip_byte_len)?;
+                let mut buff = [0; 16];
+                self.copy_to_slice(&mut buff[..ip_byte_len]);
+                IpAddr::V6(Ipv6Addr::from(buff))
+            }
+            Afi::LinkState => {
+                return Err(ParserError::ParseError(
+                    "VPN NLRI not supported for Link-State AFI".to_string(),
+                ));
+            }
+        };
+
+        let prefix = match IpNet::new(addr, ip_bit_len) {
+            Ok(p) => p,
+            Err(_) => {
+                return Err(ParserError::ParseError(format!(
+                    "Invalid VPN network prefix length: {}",
+                    ip_bit_len
+                )))
+            }
+        };
+
+        Ok(NetworkPrefix::new(prefix, path_id, Some(rd)))
     }
 
     fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserError> {
@@ -269,6 +364,25 @@ pub fn parse_nlri_list(
             let prefix = input_2.read_nlri_prefix(afi, add_path)?;
             prefixes.push(prefix);
         }
+    }
+
+    Ok(prefixes)
+}
+
+/// Parse a list of VPN NLRI prefixes (SAFI 128 - MPLS-labeled VPN).
+///
+/// This function handles VPN-IPv4 and VPN-IPv6 NLRI which include
+/// MPLS labels and Route Distinguishers per RFC 4364.
+pub fn parse_vpn_nlri_list(
+    mut input: Bytes,
+    add_path: bool,
+    afi: &Afi,
+) -> Result<Vec<NetworkPrefix>, ParserError> {
+    let mut prefixes = vec![];
+
+    while input.remaining() > 0 {
+        let prefix = input.read_vpn_nlri_prefix(afi, add_path)?;
+        prefixes.push(prefix);
     }
 
     Ok(prefixes)
@@ -585,6 +699,7 @@ mod tests {
         let expected = NetworkPrefix::new(
             IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
             None,
+            None,
         );
         assert_eq!(buf.read_nlri_prefix(&Afi::Ipv4, false).unwrap(), expected);
 
@@ -592,6 +707,7 @@ mod tests {
         let expected = NetworkPrefix::new(
             IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
             Some(1),
+            None,
         );
         assert_eq!(buf.read_nlri_prefix(&Afi::Ipv4, true).unwrap(), expected);
     }
@@ -631,9 +747,11 @@ mod tests {
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
                 None,
+                None,
             ),
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
+                None,
                 None,
             ),
         ];
@@ -644,10 +762,12 @@ mod tests {
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
                 Some(1),
+                None,
             ),
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
                 Some(1),
+                None,
             ),
         ];
         let expected = Bytes::from_static(&[
@@ -694,9 +814,11 @@ mod tests {
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
                 None,
+                None,
             ),
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
+                None,
                 None,
             ),
         ];
@@ -711,10 +833,12 @@ mod tests {
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
                 Some(1),
+                None,
             ),
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
                 Some(2),
+                None,
             ),
         ];
         assert_eq!(parse_nlri_list(input, true, &Afi::Ipv4).unwrap(), expected);
@@ -724,6 +848,7 @@ mod tests {
         let expected = vec![NetworkPrefix::new(
             IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
             Some(1),
+            None,
         )];
         assert_eq!(parse_nlri_list(input, false, &Afi::Ipv4).unwrap(), expected);
     }
@@ -744,5 +869,98 @@ mod tests {
         let (seconds, microseconds) = convert_timestamp(1609459200.1234567);
         assert_eq!(seconds, 1609459200);
         assert_eq!(microseconds, 123456); // Should round to microseconds
+    }
+
+    #[test]
+    fn test_read_vpn_nlri_prefix_ipv4() {
+        // VPN-IPv4 NLRI: label (3 bytes) + RD (8 bytes) + /24 prefix (3 bytes)
+        // Total length = 24 (label) + 64 (RD) + 24 (prefix) = 112 bits = 0x70
+        let mut buf = Bytes::from_static(&[
+            0x70, // 112 bits total length
+            0x00, 0x00, 0x01, // MPLS label (ignored)
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, // RD: type 0, admin 256, assigned 100:1
+            0xC0, 0xA8, 0x01, // 192.168.1.0/24
+        ]);
+
+        let result = buf.read_vpn_nlri_prefix(&Afi::Ipv4, false).unwrap();
+
+        assert_eq!(result.prefix.prefix_len(), 24);
+        assert_eq!(result.prefix.addr(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 0)));
+        assert!(result.rd.is_some());
+        let rd = result.rd.unwrap();
+        assert_eq!(rd.0, [0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01]);
+    }
+
+    #[test]
+    fn test_read_vpn_nlri_prefix_with_path_id() {
+        // VPN-IPv4 NLRI with path ID
+        let mut buf = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x2A, // Path ID = 42
+            0x70, // 112 bits total length
+            0x00, 0x00, 0x01, // MPLS label
+            0x00, 0x02, 0x01, 0x02, 0x03, 0x04, 0x00, 0x64, // RD: type 0, some value
+            0x0A, 0x00, 0x00, // 10.0.0.0/24
+        ]);
+
+        let result = buf.read_vpn_nlri_prefix(&Afi::Ipv4, true).unwrap();
+
+        assert_eq!(result.path_id, Some(42));
+        assert_eq!(result.prefix.prefix_len(), 24);
+        assert!(result.rd.is_some());
+    }
+
+    #[test]
+    fn test_read_vpn_nlri_prefix_ipv6() {
+        // VPN-IPv6 NLRI: label (3 bytes) + RD (8 bytes) + /64 prefix (8 bytes)
+        // Total length = 24 (label) + 64 (RD) + 64 (prefix) = 152 bits = 0x98
+        let mut buf = Bytes::from_static(&[
+            0x98, // 152 bits total length
+            0x00, 0x00, 0x01, // MPLS label
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, // RD
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, // 2001:db8::/64
+        ]);
+
+        let result = buf.read_vpn_nlri_prefix(&Afi::Ipv6, false).unwrap();
+
+        assert_eq!(result.prefix.prefix_len(), 64);
+        assert!(result.rd.is_some());
+    }
+
+    #[test]
+    fn test_parse_vpn_nlri_list() {
+        // Two VPN-IPv4 prefixes
+        let input = Bytes::from_static(&[
+            // First prefix: 10.0.0.0/24
+            0x70, // 112 bits
+            0x00, 0x00, 0x01, // label
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, // RD
+            0x0A, 0x00, 0x00, // 10.0.0.0/24
+            // Second prefix: 10.0.1.0/24
+            0x70, // 112 bits
+            0x00, 0x00, 0x02, // label
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x02, // RD
+            0x0A, 0x00, 0x01, // 10.0.1.0/24
+        ]);
+
+        let result = parse_vpn_nlri_list(input, false, &Afi::Ipv4).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert!(result[0].rd.is_some());
+        assert!(result[1].rd.is_some());
+        assert_eq!(result[0].prefix.prefix_len(), 24);
+        assert_eq!(result[1].prefix.prefix_len(), 24);
+    }
+
+    #[test]
+    fn test_vpn_nlri_too_short() {
+        // VPN NLRI with length less than minimum (88 bits)
+        let mut buf = Bytes::from_static(&[
+            0x50, // 80 bits - too short
+            0x00, 0x00, 0x01, // label
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, // RD
+        ]);
+
+        let result = buf.read_vpn_nlri_prefix(&Afi::Ipv4, false);
+        assert!(result.is_err());
     }
 }

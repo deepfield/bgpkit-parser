@@ -105,7 +105,7 @@ pub fn parse_table_dump_message(
     Ok(TableDumpMessage {
         view_number,
         sequence_number,
-        prefix: NetworkPrefix::new(prefix, None),
+        prefix: NetworkPrefix::new(prefix, None, None),
         status,
         originated_time: time,
         peer_ip,
@@ -300,7 +300,7 @@ mod tests {
         let table_dump = TableDumpMessage {
             view_number: 1,
             sequence_number: 2,
-            prefix: NetworkPrefix::new(prefix, None),
+            prefix: NetworkPrefix::new(prefix, None, None),
             status: 1,
             originated_time: 12345,
             peer_ip: IpAddr::V4("10.0.0.1".parse().unwrap()),

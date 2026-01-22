@@ -1,7 +1,7 @@
 use crate::models::*;
 use crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop;
 use crate::parser::bgp::attributes::attr_29_linkstate::parse_link_state_nlri;
-use crate::parser::{parse_nlri_list, ReadUtils};
+use crate::parser::{parse_nlri_list, parse_vpn_nlri_list, ReadUtils};
 use crate::ParserError;
 use bytes::{BufMut, Bytes, BytesMut};
 
@@ -77,7 +77,9 @@ pub fn parse_nlri(
             let link_state_list = ls_nlri.link_state_nlris;
             (Vec::new(), link_state_list)
         } else {
-            // Parse traditional IP prefixes
+            // Parse traditional IP prefixes or VPN prefixes
+            let is_vpn = matches!(safi, Safi::MplsVpn | Safi::MulticastVpn);
+
             let prefixes = match prefixes {
                 Some(pfxs) => {
                     // skip parsing prefixes: https://datatracker.ietf.org/doc/html/rfc6396#section-4.3.4
@@ -88,7 +90,11 @@ pub fn parse_nlri(
                                 warn!("NRLI reserved byte not 0");
                             }
                         }
-                        parse_nlri_list(input, additional_paths, &afi)?
+                        if is_vpn {
+                            parse_vpn_nlri_list(input, additional_paths, &afi)?
+                        } else {
+                            parse_nlri_list(input, additional_paths, &afi)?
+                        }
                     } else {
                         pfxs.to_vec()
                     }
@@ -100,7 +106,11 @@ pub fn parse_nlri(
                             warn!("NRLI reserved byte not 0");
                         }
                     }
-                    parse_nlri_list(input, additional_paths, &afi)?
+                    if is_vpn {
+                        parse_vpn_nlri_list(input, additional_paths, &afi)?
+                    } else {
+                        parse_nlri_list(input, additional_paths, &afi)?
+                    }
                 }
             };
             (prefixes, None)
@@ -309,7 +319,7 @@ mod tests {
                     Ipv4Addr::from_str("192.0.2.1").unwrap()
                 ))
             );
-            let prefix = NetworkPrefix::new(IpNet::from_str("192.0.2.0/24").unwrap(), Some(123));
+            let prefix = NetworkPrefix::new(IpNet::from_str("192.0.2.0/24").unwrap(), Some(123), None);
             assert_eq!(nlri.prefixes[0], prefix);
             assert_eq!(nlri.prefixes[0].path_id, prefix.path_id);
         } else {
@@ -328,6 +338,7 @@ mod tests {
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
+                rd: None,
             }],
             link_state_nlris: None,
             flowspec_nlris: None,
@@ -358,6 +369,7 @@ mod tests {
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: Some(123),
+                rd: None,
             }],
             link_state_nlris: None,
             flowspec_nlris: None,
@@ -416,6 +428,7 @@ mod tests {
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
+                rd: None,
             }],
             link_state_nlris: None,
             flowspec_nlris: None,
@@ -448,6 +461,7 @@ mod tests {
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
+                rd: None,
             }],
             link_state_nlris: None,
             flowspec_nlris: None,

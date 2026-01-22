@@ -152,7 +152,7 @@ fn parse_prefix_component(data: &[u8], offset: &mut usize) -> Result<NetworkPref
         let ipnet = IpNet::V4(
             ipnet::Ipv4Net::new(addr, prefix_len).map_err(|_| FlowSpecError::InvalidPrefix)?,
         );
-        NetworkPrefix::new(ipnet, None)
+        NetworkPrefix::new(ipnet, None, None)
     } else {
         // IPv6
         let mut addr_bytes = [0u8; 16];
@@ -161,7 +161,7 @@ fn parse_prefix_component(data: &[u8], offset: &mut usize) -> Result<NetworkPref
         let ipnet = IpNet::V6(
             ipnet::Ipv6Net::new(addr, prefix_len).map_err(|_| FlowSpecError::InvalidPrefix)?,
         );
-        NetworkPrefix::new(ipnet, None)
+        NetworkPrefix::new(ipnet, None, None)
     };
 
     Ok(prefix)

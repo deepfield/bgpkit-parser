@@ -5,19 +5,24 @@ use ipnet::IpNet;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 
+use super::RouteDistinguisher;
+
 /// A representation of a network prefix with an optional path ID.
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
 pub struct NetworkPrefix {
     pub prefix: IpNet,
     pub path_id: Option<u32>,
+    pub rd: Option<RouteDistinguisher>,
 }
 
 // Attempt to reduce the size of the debug output
 impl Debug for NetworkPrefix {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.path_id {
-            Some(path_id) => write!(f, "{}#{}", self.prefix, path_id),
-            None => write!(f, "{}", self.prefix),
+        match (&self.rd, self.path_id) {
+            (Some(rd), Some(path_id)) => write!(f, "{}:{}#{}", rd, self.prefix, path_id),
+            (Some(rd), None) => write!(f, "{}:{}", rd, self.prefix),
+            (None, Some(path_id)) => write!(f, "{}#{}", self.prefix, path_id),
+            (None, None) => write!(f, "{}", self.prefix),
         }
     }
 }
@@ -30,13 +35,14 @@ impl FromStr for NetworkPrefix {
         Ok(NetworkPrefix {
             prefix,
             path_id: None,
+            rd: None,
         })
     }
 }
 
 impl NetworkPrefix {
-    pub fn new(prefix: IpNet, path_id: Option<u32>) -> NetworkPrefix {
-        NetworkPrefix { prefix, path_id }
+    pub fn new(prefix: IpNet, path_id: Option<u32>, rd: Option<RouteDistinguisher>) -> NetworkPrefix {
+        NetworkPrefix { prefix, path_id, rd }
     }
 
     #[cfg(feature = "parser")]
@@ -106,6 +112,15 @@ mod serde_impl {
     enum SerdeNetworkPrefixRepr {
         PlainPrefix(IpNet),
         WithPathId { prefix: IpNet, path_id: u32 },
+        WithRd {
+            prefix: IpNet,
+            rd: RouteDistinguisher,
+        },
+        WithPathIdAndRd {
+            prefix: IpNet,
+            path_id: u32,
+            rd: RouteDistinguisher,
+        },
     }
 
     impl Serialize for NetworkPrefix {
@@ -113,13 +128,24 @@ mod serde_impl {
         where
             S: Serializer,
         {
-            match self.path_id {
-                Some(path_id) => SerdeNetworkPrefixRepr::WithPathId {
+            match (self.path_id, &self.rd) {
+                (Some(path_id), Some(rd)) => SerdeNetworkPrefixRepr::WithPathIdAndRd {
+                    prefix: self.prefix,
+                    path_id,
+                    rd: *rd,
+                }
+                .serialize(serializer),
+                (Some(path_id), None) => SerdeNetworkPrefixRepr::WithPathId {
                     prefix: self.prefix,
                     path_id,
                 }
                 .serialize(serializer),
-                None => self.prefix.serialize(serializer),
+                (None, Some(rd)) => SerdeNetworkPrefixRepr::WithRd {
+                    prefix: self.prefix,
+                    rd: *rd,
+                }
+                .serialize(serializer),
+                (None, None) => self.prefix.serialize(serializer),
             }
         }
     }
@@ -133,10 +159,26 @@ mod serde_impl {
                 SerdeNetworkPrefixRepr::PlainPrefix(prefix) => Ok(NetworkPrefix {
                     prefix,
                     path_id: None,
+                    rd: None,
                 }),
                 SerdeNetworkPrefixRepr::WithPathId { prefix, path_id } => Ok(NetworkPrefix {
                     prefix,
                     path_id: Some(path_id),
+                    rd: None,
+                }),
+                SerdeNetworkPrefixRepr::WithRd { prefix, rd } => Ok(NetworkPrefix {
+                    prefix,
+                    path_id: None,
+                    rd: Some(rd),
+                }),
+                SerdeNetworkPrefixRepr::WithPathIdAndRd {
+                    prefix,
+                    path_id,
+                    rd,
+                } => Ok(NetworkPrefix {
+                    prefix,
+                    path_id: Some(path_id),
+                    rd: Some(rd),
                 }),
             }
         }
@@ -163,14 +205,14 @@ mod tests {
     #[cfg(feature = "parser")]
     fn test_encode() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
-        let network_prefix = NetworkPrefix::new(prefix, Some(1));
+        let network_prefix = NetworkPrefix::new(prefix, Some(1), None);
         let _encoded = network_prefix.encode();
     }
 
     #[test]
     fn test_display() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
-        let network_prefix = NetworkPrefix::new(prefix, Some(1));
+        let network_prefix = NetworkPrefix::new(prefix, Some(1), None);
         assert_eq!(network_prefix.to_string(), "192.168.0.0/24");
     }
 
@@ -178,7 +220,7 @@ mod tests {
     #[cfg(feature = "serde")]
     fn test_serialization() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
-        let network_prefix = NetworkPrefix::new(prefix, Some(1));
+        let network_prefix = NetworkPrefix::new(prefix, Some(1), None);
         let serialized = serde_json::to_string(&network_prefix).unwrap();
         assert_eq!(serialized, "{\"prefix\":\"192.168.0.0/24\",\"path_id\":1}");
     }
@@ -199,7 +241,7 @@ mod tests {
     #[cfg(feature = "serde")]
     fn test_binary_serialization_with_path_id() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
-        let network_prefix = NetworkPrefix::new(prefix, Some(42));
+        let network_prefix = NetworkPrefix::new(prefix, Some(42), None);
         // Test non-human readable serialization (binary-like)
         let serialized = serde_json::to_vec(&network_prefix).unwrap();
         let deserialized: NetworkPrefix = serde_json::from_slice(&serialized).unwrap();
@@ -210,7 +252,44 @@ mod tests {
     #[test]
     fn test_debug() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
-        let network_prefix = NetworkPrefix::new(prefix, Some(1));
+        let network_prefix = NetworkPrefix::new(prefix, Some(1), None);
         assert_eq!(format!("{network_prefix:?}"), "192.168.0.0/24#1");
+    }
+
+    #[test]
+    fn test_vpn_prefix() {
+        let prefix = IpNet::from_str("10.0.0.0/24").unwrap();
+        let rd = RouteDistinguisher([0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01]);
+        let vpn_prefix = NetworkPrefix::new(prefix, None, Some(rd));
+
+        assert_eq!(vpn_prefix.prefix, prefix);
+        assert_eq!(vpn_prefix.path_id, None);
+        assert_eq!(vpn_prefix.rd, Some(rd));
+    }
+
+    #[test]
+    fn test_vpn_prefix_debug() {
+        let prefix = IpNet::from_str("10.0.0.0/24").unwrap();
+        let rd = RouteDistinguisher([0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01]);
+        let vpn_prefix = NetworkPrefix::new(prefix, Some(42), Some(rd));
+
+        // Debug format should include RD, prefix, and path_id
+        let debug_str = format!("{vpn_prefix:?}");
+        assert!(debug_str.contains("10.0.0.0/24"));
+        assert!(debug_str.contains("#42"));
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_vpn_prefix_serialization() {
+        let prefix = IpNet::from_str("10.0.0.0/24").unwrap();
+        let rd = RouteDistinguisher([0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01]);
+        let vpn_prefix = NetworkPrefix::new(prefix, None, Some(rd));
+
+        let serialized = serde_json::to_string(&vpn_prefix).unwrap();
+        let deserialized: NetworkPrefix = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.prefix, prefix);
+        assert_eq!(deserialized.rd, Some(rd));
     }
 }
