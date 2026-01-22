@@ -245,10 +245,30 @@ pub trait ReadUtils: Buf {
             )));
         }
 
-        // Skip MPLS label (3 bytes = 24 bits)
-        // We don't store the label, but we need to consume it
-        self.has_n_remaining(3)?;
-        let _label_bytes = self.copy_to_bytes(3);
+        // Read MPLS label stack until we find the bottom-of-stack (BOS) label.
+        // Each label is 3 bytes. The BOS bit is the LSB of the 3rd byte.
+        // We don't store the labels, but we need to consume them.
+        let mut label_bits_consumed: u8 = 0;
+        loop {
+            self.has_n_remaining(3)?;
+            let mut label = [0u8; 3];
+            self.copy_to_slice(&mut label);
+            label_bits_consumed += MPLS_LABEL_BITS;
+
+            // BOS bit is the least significant bit of the 3rd byte
+            let bos = (label[2] & 0x01) == 1;
+            if bos {
+                break;
+            }
+
+            // Sanity check to prevent infinite loop on malformed data
+            if label_bits_consumed > total_bit_len.saturating_sub(RD_BITS) {
+                return Err(ParserError::ParseError(format!(
+                    "MPLS label stack exceeds NLRI length: {} bits consumed, total {} bits",
+                    label_bits_consumed, total_bit_len
+                )));
+            }
+        }
 
         // Read Route Distinguisher (8 bytes = 64 bits)
         self.has_n_remaining(RD_BYTES)?;
@@ -256,8 +276,8 @@ pub trait ReadUtils: Buf {
         self.copy_to_slice(&mut rd_bytes);
         let rd = RouteDistinguisher(rd_bytes);
 
-        // Calculate IP prefix length: total - label (24) - RD (64)
-        let ip_bit_len = total_bit_len - MPLS_LABEL_BITS - RD_BITS;
+        // Calculate IP prefix length: total - labels - RD (64)
+        let ip_bit_len = total_bit_len - label_bits_consumed - RD_BITS;
         let ip_byte_len: usize = (ip_bit_len as usize).div_ceil(8);
 
         let addr: IpAddr = match afi {
@@ -894,11 +914,12 @@ mod tests {
     #[test]
     fn test_read_vpn_nlri_prefix_with_path_id() {
         // VPN-IPv4 NLRI with path ID
+        // MPLS label format: 20-bit label, 3-bit EXP, 1-bit BOS (LSB of 3rd byte)
         let mut buf = Bytes::from_static(&[
             0x00, 0x00, 0x00, 0x2A, // Path ID = 42
             0x70, // 112 bits total length
-            0x00, 0x00, 0x01, // MPLS label
-            0x00, 0x02, 0x01, 0x02, 0x03, 0x04, 0x00, 0x64, // RD: type 0, some value
+            0x00, 0x00, 0x11, // MPLS label with BOS=1 (0x11 & 0x01 = 1)
+            0x00, 0x02, 0x01, 0x02, 0x03, 0x04, 0x00, 0x64, // RD: type 2, some value
             0x0A, 0x00, 0x00, // 10.0.0.0/24
         ]);
 
@@ -913,10 +934,11 @@ mod tests {
     fn test_read_vpn_nlri_prefix_ipv6() {
         // VPN-IPv6 NLRI: label (3 bytes) + RD (8 bytes) + /64 prefix (8 bytes)
         // Total length = 24 (label) + 64 (RD) + 64 (prefix) = 152 bits = 0x98
+        // MPLS label format: 20-bit label, 3-bit EXP, 1-bit BOS (LSB of 3rd byte)
         let mut buf = Bytes::from_static(&[
             0x98, // 152 bits total length
-            0x00, 0x00, 0x01, // MPLS label
-            0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, // RD
+            0x00, 0x00, 0x01, // MPLS label with BOS=1 (0x01 & 0x01 = 1)
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, // RD: type 1
             0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, // 2001:db8::/64
         ]);
 
@@ -929,15 +951,17 @@ mod tests {
     #[test]
     fn test_parse_vpn_nlri_list() {
         // Two VPN-IPv4 prefixes
+        // MPLS label format: 20-bit label, 3-bit EXP, 1-bit BOS (LSB of 3rd byte)
+        // BOS=1 means bottom of stack (last/only label)
         let input = Bytes::from_static(&[
             // First prefix: 10.0.0.0/24
             0x70, // 112 bits
-            0x00, 0x00, 0x01, // label
+            0x00, 0x00, 0x01, // label with BOS=1 (0x01 & 0x01 = 1)
             0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, // RD
             0x0A, 0x00, 0x00, // 10.0.0.0/24
             // Second prefix: 10.0.1.0/24
             0x70, // 112 bits
-            0x00, 0x00, 0x02, // label
+            0x00, 0x00, 0x03, // label with BOS=1 (0x03 & 0x01 = 1)
             0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x02, // RD
             0x0A, 0x00, 0x01, // 10.0.1.0/24
         ]);
@@ -962,5 +986,29 @@ mod tests {
 
         let result = buf.read_vpn_nlri_prefix(&Afi::Ipv4, false);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_vpn_nlri_prefix_multi_label() {
+        // VPN-IPv4 NLRI with 2 MPLS labels (common in L3VPN)
+        // Total length = 48 (2 labels) + 64 (RD) + 24 (prefix) = 136 bits = 0x88
+        // MPLS label format: 20-bit label, 3-bit EXP, 1-bit BOS
+        let mut buf = Bytes::from_static(&[
+            0x88, // 136 bits total length
+            0x00, 0x10, 0x00, // First label (label=1, EXP=0, BOS=0)
+            0x00, 0x20, 0x01, // Second label (label=2, EXP=0, BOS=1)
+            0x00, 0x00, 0x00, 0x00, 0xFD, 0xE8, 0x00, 0x64, // RD: type 0, admin=65000, assigned=100
+            0xC0, 0xA8, 0x01, // 192.168.1.0/24
+        ]);
+
+        let result = buf.read_vpn_nlri_prefix(&Afi::Ipv4, false).unwrap();
+
+        assert_eq!(result.prefix.prefix_len(), 24);
+        assert_eq!(result.prefix.addr(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 0)));
+        assert!(result.rd.is_some());
+        let rd = result.rd.unwrap();
+        // RD type is bytes 0-1: 0x0000 = type 0
+        assert_eq!(rd.0[0], 0x00);
+        assert_eq!(rd.0[1], 0x00);
     }
 }
