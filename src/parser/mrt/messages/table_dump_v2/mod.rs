@@ -1,11 +1,13 @@
 mod geo_peer_table;
 mod peer_index_table;
 mod rib_afi_entries;
+mod rib_generic_entries;
 
 use crate::error::ParserError;
 use crate::messages::table_dump_v2::geo_peer_table::parse_geo_peer_table;
 use crate::messages::table_dump_v2::peer_index_table::parse_peer_index_table;
 use crate::messages::table_dump_v2::rib_afi_entries::parse_rib_afi_entries;
+use crate::messages::table_dump_v2::rib_generic_entries::parse_rib_generic_entries;
 use crate::models::*;
 #[cfg(test)]
 use bytes::BufMut;
@@ -47,9 +49,7 @@ pub fn parse_table_dump_v2_message(
             TableDumpV2Message::RibAfi(parse_rib_afi_entries(&mut input, v2_type)?)
         }
         TableDumpV2Type::RibGeneric | TableDumpV2Type::RibGenericAddPath => {
-            return Err(ParserError::Unsupported(
-                "TableDumpV2 RibGeneric is not currently supported".to_string(),
-            ))
+            TableDumpV2Message::RibGeneric(parse_rib_generic_entries(&mut input, v2_type)?)
         }
         TableDumpV2Type::GeoPeerTable => {
             TableDumpV2Message::GeoPeerTable(parse_geo_peer_table(&mut input)?)
@@ -64,13 +64,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_unsupported_type() {
-        // Test RibGeneric (subtype 6) - should be unsupported
-        let msg = parse_table_dump_v2_message(6, Bytes::new());
-        assert!(msg.is_err());
-
-        // Test RibGenericAddPath (subtype 13) - should be unsupported
-        let msg = parse_table_dump_v2_message(13, Bytes::new());
+    fn test_invalid_subtype() {
+        // Test invalid subtype (14) - should fail to convert to TableDumpV2Type
+        let msg = parse_table_dump_v2_message(14, Bytes::new());
         assert!(msg.is_err());
     }
 

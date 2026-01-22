@@ -1,7 +1,7 @@
 use crate::models::*;
 use crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop;
 use crate::parser::bgp::attributes::attr_29_linkstate::parse_link_state_nlri;
-use crate::parser::{parse_nlri_list, parse_vpn_nlri_list, ReadUtils};
+use crate::parser::{parse_nlri_list, ReadUtils};
 use crate::ParserError;
 use bytes::{BufMut, Bytes, BytesMut};
 
@@ -77,9 +77,7 @@ pub fn parse_nlri(
             let link_state_list = ls_nlri.link_state_nlris;
             (Vec::new(), link_state_list)
         } else {
-            // Parse traditional IP prefixes or VPN prefixes
-            let is_vpn = matches!(safi, Safi::MplsVpn | Safi::MulticastVpn);
-
+            // Parse traditional IP prefixes
             let prefixes = match prefixes {
                 Some(pfxs) => {
                     // skip parsing prefixes: https://datatracker.ietf.org/doc/html/rfc6396#section-4.3.4
@@ -90,11 +88,7 @@ pub fn parse_nlri(
                                 warn!("NRLI reserved byte not 0");
                             }
                         }
-                        if is_vpn {
-                            parse_vpn_nlri_list(input, additional_paths, &afi)?
-                        } else {
-                            parse_nlri_list(input, additional_paths, &afi)?
-                        }
+                        parse_nlri_list(input, additional_paths, &afi)?
                     } else {
                         pfxs.to_vec()
                     }
@@ -106,11 +100,7 @@ pub fn parse_nlri(
                             warn!("NRLI reserved byte not 0");
                         }
                     }
-                    if is_vpn {
-                        parse_vpn_nlri_list(input, additional_paths, &afi)?
-                    } else {
-                        parse_nlri_list(input, additional_paths, &afi)?
-                    }
+                    parse_nlri_list(input, additional_paths, &afi)?
                 }
             };
             (prefixes, None)
