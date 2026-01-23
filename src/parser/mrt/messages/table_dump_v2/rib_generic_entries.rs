@@ -2,7 +2,7 @@ use crate::models::{RibGenericEntries, Safi, TableDumpV2Type};
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, Bytes};
-use log::warn;
+use log::{debug, warn};
 
 use super::rib_afi_entries::parse_rib_entry;
 
@@ -27,6 +27,10 @@ pub fn parse_rib_generic_entries(
     };
 
     let entry_count = data.read_u16()?;
+    debug!(
+        "RIB_GENERIC: afi={:?}, safi={:?}, prefix={}, entries={}",
+        afi, safi, nlri, entry_count
+    );
     // Pre-allocate cautiously to avoid overflow/OOM with malformed inputs
     let min_entry_size =
         2 /*peer_index*/ + 4 /*time*/ + 2 /*attr_len*/ + if is_add_path { 4 } else { 0 };

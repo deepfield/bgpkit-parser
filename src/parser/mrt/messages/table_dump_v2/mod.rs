@@ -12,6 +12,7 @@ use crate::models::*;
 #[cfg(test)]
 use bytes::BufMut;
 use bytes::Bytes;
+use log::debug;
 use std::convert::TryFrom;
 
 /// Parse TABLE_DUMP V2 format MRT message.
@@ -32,6 +33,7 @@ pub fn parse_table_dump_v2_message(
     mut input: Bytes,
 ) -> Result<TableDumpV2Message, ParserError> {
     let v2_type: TableDumpV2Type = TableDumpV2Type::try_from(sub_type)?;
+    debug!("TABLE_DUMP_V2: subtype={} ({:?})", sub_type, v2_type);
 
     let msg: TableDumpV2Message = match v2_type {
         TableDumpV2Type::PeerIndexTable => {
