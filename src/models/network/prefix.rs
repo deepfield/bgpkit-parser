@@ -41,8 +41,16 @@ impl FromStr for NetworkPrefix {
 }
 
 impl NetworkPrefix {
-    pub fn new(prefix: IpNet, path_id: Option<u32>, rd: Option<RouteDistinguisher>) -> NetworkPrefix {
-        NetworkPrefix { prefix, path_id, rd }
+    pub fn new(
+        prefix: IpNet,
+        path_id: Option<u32>,
+        rd: Option<RouteDistinguisher>,
+    ) -> NetworkPrefix {
+        NetworkPrefix {
+            prefix,
+            path_id,
+            rd,
+        }
     }
 
     #[cfg(feature = "parser")]
@@ -111,7 +119,10 @@ mod serde_impl {
     #[serde(untagged, deny_unknown_fields)]
     enum SerdeNetworkPrefixRepr {
         PlainPrefix(IpNet),
-        WithPathId { prefix: IpNet, path_id: u32 },
+        WithPathId {
+            prefix: IpNet,
+            path_id: u32,
+        },
         WithRd {
             prefix: IpNet,
             rd: RouteDistinguisher,
