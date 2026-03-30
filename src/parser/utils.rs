@@ -898,14 +898,18 @@ mod tests {
         let mut buf = Bytes::from_static(&[
             0x70, // 112 bits total length
             0x00, 0x00, 0x01, // MPLS label (ignored)
-            0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, // RD: type 0, admin 256, assigned 100:1
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00,
+            0x01, // RD: type 0, admin 256, assigned 100:1
             0xC0, 0xA8, 0x01, // 192.168.1.0/24
         ]);
 
         let result = buf.read_vpn_nlri_prefix(&Afi::Ipv4, false).unwrap();
 
         assert_eq!(result.prefix.prefix_len(), 24);
-        assert_eq!(result.prefix.addr(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 0)));
+        assert_eq!(
+            result.prefix.addr(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 0))
+        );
         assert!(result.rd.is_some());
         let rd = result.rd.unwrap();
         assert_eq!(rd.0, [0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01]);
@@ -997,14 +1001,18 @@ mod tests {
             0x88, // 136 bits total length
             0x00, 0x10, 0x00, // First label (label=1, EXP=0, BOS=0)
             0x00, 0x20, 0x01, // Second label (label=2, EXP=0, BOS=1)
-            0x00, 0x00, 0x00, 0x00, 0xFD, 0xE8, 0x00, 0x64, // RD: type 0, admin=65000, assigned=100
+            0x00, 0x00, 0x00, 0x00, 0xFD, 0xE8, 0x00,
+            0x64, // RD: type 0, admin=65000, assigned=100
             0xC0, 0xA8, 0x01, // 192.168.1.0/24
         ]);
 
         let result = buf.read_vpn_nlri_prefix(&Afi::Ipv4, false).unwrap();
 
         assert_eq!(result.prefix.prefix_len(), 24);
-        assert_eq!(result.prefix.addr(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 0)));
+        assert_eq!(
+            result.prefix.addr(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 0))
+        );
         assert!(result.rd.is_some());
         let rd = result.rd.unwrap();
         // RD type is bytes 0-1: 0x0000 = type 0

@@ -309,7 +309,8 @@ mod tests {
                     Ipv4Addr::from_str("192.0.2.1").unwrap()
                 ))
             );
-            let prefix = NetworkPrefix::new(IpNet::from_str("192.0.2.0/24").unwrap(), Some(123), None);
+            let prefix =
+                NetworkPrefix::new(IpNet::from_str("192.0.2.0/24").unwrap(), Some(123), None);
             assert_eq!(nlri.prefixes[0], prefix);
             assert_eq!(nlri.prefixes[0].path_id, prefix.path_id);
         } else {

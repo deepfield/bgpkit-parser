@@ -20,10 +20,14 @@ pub fn parse_rib_generic_entries(
     let afi = data.read_afi()?;
     let safi = data.read_safi()?;
 
-    let nlri = if safi == Safi::MplsVpn {
-        data.read_vpn_nlri_prefix(&afi, is_add_path)?
-    } else {
-        data.read_nlri_prefix(&afi, is_add_path)?
+    let nlri = match safi {
+        Safi::MplsVpn => data.read_vpn_nlri_prefix(&afi, is_add_path)?,
+        _ => {
+            return Err(ParserError::Unsupported(format!(
+                "RIB_GENERIC: unsupported SAFI {:?} for NLRI parsing",
+                safi
+            )));
+        }
     };
 
     let entry_count = data.read_u16()?;
