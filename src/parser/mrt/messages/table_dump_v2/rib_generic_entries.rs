@@ -92,9 +92,9 @@ mod tests {
 
         // Route Distinguisher (8 bytes)
         // Type 0: 2-byte admin + 4-byte assigned
-        bytes.put_u16(0); // RD type
-        bytes.put_u16(65000); // admin (ASN)
-        bytes.put_u32(100); // assigned number
+        bytes.put_u16(u16::from_be_bytes([0x00, 0x00])); // RD type
+        bytes.put_u16(u16::from_be_bytes([0xFD, 0xE8])); // admin (ASN)
+        bytes.put_u32(u32::from_be_bytes([0x00, 0x00, 0x00, 0x64])); // assigned number
 
         // IP prefix: 192.0.2.0/24 (3 bytes for /24)
         bytes.put_u8(192);
