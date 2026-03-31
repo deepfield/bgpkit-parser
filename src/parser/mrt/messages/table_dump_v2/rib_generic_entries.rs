@@ -6,7 +6,7 @@ use log::{debug, warn};
 
 use super::rib_afi_entries::parse_rib_entry;
 
-/// RIB Generic entries per RFC 6396 Section 4.3.4.
+/// RIB Generic entries per [RFC 6396 Section 4.3.3](https://datatracker.ietf.org/doc/html/rfc6396#section-4.3.3).
 ///
 /// The RIB_GENERIC header consists of an AFI, SAFI, and a single NLRI entry.
 /// The NLRI information is specific to the AFI and SAFI values.
@@ -92,9 +92,9 @@ mod tests {
 
         // Route Distinguisher (8 bytes)
         // Type 0: 2-byte admin + 4-byte assigned
-        bytes.put_u16(0); // RD type
-        bytes.put_u16(65000); // admin (ASN)
-        bytes.put_u32(100); // assigned number
+        bytes.put_u16(u16::from_be_bytes([0x00, 0x00])); // RD type
+        bytes.put_u16(u16::from_be_bytes([0xFD, 0xE8])); // admin (ASN)
+        bytes.put_u32(u32::from_be_bytes([0x00, 0x00, 0x00, 0x64])); // assigned number
 
         // IP prefix: 192.0.2.0/24 (3 bytes for /24)
         bytes.put_u8(192);
@@ -110,7 +110,8 @@ mod tests {
         assert_eq!(result.sequence_number, 1);
         assert_eq!(result.afi, Afi::Ipv4);
         assert_eq!(result.safi, Safi::MplsVpn);
-        assert!(result.nlri.rd.is_some());
+        let rd = result.nlri.rd.unwrap();
+        assert_eq!(rd.0, [0x00, 0x00, 0xFD, 0xE8, 0x00, 0x00, 0x00, 0x64]);
         assert_eq!(result.nlri.prefix.to_string(), "192.0.2.0/24");
         assert_eq!(result.rib_entries.len(), 0);
 

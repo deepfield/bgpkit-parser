@@ -216,12 +216,9 @@ pub trait ReadUtils: Buf {
 
     /// Read VPN-IPv4 or VPN-IPv6 NLRI prefix (SAFI 128 - MPLS-labeled VPN).
     ///
-    /// Per RFC 4364 Section 4.2, VPN NLRI contains:
-    /// - MPLS label stack (3 bytes per label, typically 1-2 labels)
-    /// - Route Distinguisher (8 bytes)
-    /// - IP prefix (variable)
-    ///
-    /// The length field indicates total bits including label(s) + RD + prefix.
+    /// - [RFC 8277 Section 2](https://datatracker.ietf.org/doc/html/rfc8277#section-2): labeled NLRI encoding
+    /// - [RFC 4364 Section 4.1](https://datatracker.ietf.org/doc/html/rfc4364#section-4.1): VPN-IPv4 address family
+    /// - [RFC 4659 Section 3.2](https://datatracker.ietf.org/doc/html/rfc4659#section-3.2): VPN-IPv6 NLRI encoding
     fn read_vpn_nlri_prefix(
         &mut self,
         afi: &Afi,
@@ -931,7 +928,8 @@ mod tests {
 
         assert_eq!(result.path_id, Some(42));
         assert_eq!(result.prefix.prefix_len(), 24);
-        assert!(result.rd.is_some());
+        let rd = result.rd.unwrap();
+        assert_eq!(rd.0, [0x00, 0x02, 0x01, 0x02, 0x03, 0x04, 0x00, 0x64]);
     }
 
     #[test]
@@ -949,7 +947,8 @@ mod tests {
         let result = buf.read_vpn_nlri_prefix(&Afi::Ipv6, false).unwrap();
 
         assert_eq!(result.prefix.prefix_len(), 64);
-        assert!(result.rd.is_some());
+        let rd = result.rd.unwrap();
+        assert_eq!(rd.0, [0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01]);
     }
 
     #[test]
@@ -973,8 +972,10 @@ mod tests {
         let result = parse_vpn_nlri_list(input, false, &Afi::Ipv4).unwrap();
 
         assert_eq!(result.len(), 2);
-        assert!(result[0].rd.is_some());
-        assert!(result[1].rd.is_some());
+        let rd0 = result[0].rd.unwrap();
+        assert_eq!(rd0.0, [0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01]);
+        let rd1 = result[1].rd.unwrap();
+        assert_eq!(rd1.0, [0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x02]);
         assert_eq!(result[0].prefix.prefix_len(), 24);
         assert_eq!(result[1].prefix.prefix_len(), 24);
     }
@@ -1013,10 +1014,7 @@ mod tests {
             result.prefix.addr(),
             IpAddr::V4(Ipv4Addr::new(192, 168, 1, 0))
         );
-        assert!(result.rd.is_some());
         let rd = result.rd.unwrap();
-        // RD type is bytes 0-1: 0x0000 = type 0
-        assert_eq!(rd.0[0], 0x00);
-        assert_eq!(rd.0[1], 0x00);
+        assert_eq!(rd.0, [0x00, 0x00, 0x00, 0x00, 0xFD, 0xE8, 0x00, 0x64]);
     }
 }

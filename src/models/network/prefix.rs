@@ -19,8 +19,8 @@ pub struct NetworkPrefix {
 impl Debug for NetworkPrefix {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match (&self.rd, self.path_id) {
-            (Some(rd), Some(path_id)) => write!(f, "{}:{}#{}", rd, self.prefix, path_id),
-            (Some(rd), None) => write!(f, "{}:{}", rd, self.prefix),
+            (Some(rd), Some(path_id)) => write!(f, "{}|{}#{}", rd, self.prefix, path_id),
+            (Some(rd), None) => write!(f, "{}|{}", rd, self.prefix),
             (None, Some(path_id)) => write!(f, "{}#{}", self.prefix, path_id),
             (None, None) => write!(f, "{}", self.prefix),
         }
@@ -284,10 +284,10 @@ mod tests {
         let rd = RouteDistinguisher([0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01]);
         let vpn_prefix = NetworkPrefix::new(prefix, Some(42), Some(rd));
 
-        // Debug format should include RD, prefix, and path_id
-        let debug_str = format!("{vpn_prefix:?}");
-        assert!(debug_str.contains("10.0.0.0/24"));
-        assert!(debug_str.contains("#42"));
+        assert_eq!(
+            format!("{vpn_prefix:?}"),
+            "00:01:00:00:00:64:00:01|10.0.0.0/24#42"
+        );
     }
 
     #[test]
