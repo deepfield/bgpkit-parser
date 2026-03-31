@@ -6,7 +6,7 @@ use log::{debug, warn};
 
 use super::rib_afi_entries::parse_rib_entry;
 
-/// RIB Generic entries per RFC 6396 Section 4.3.4.
+/// RIB Generic entries per [RFC 6396 Section 4.3.3](https://datatracker.ietf.org/doc/html/rfc6396#section-4.3.3).
 ///
 /// The RIB_GENERIC header consists of an AFI, SAFI, and a single NLRI entry.
 /// The NLRI information is specific to the AFI and SAFI values.
