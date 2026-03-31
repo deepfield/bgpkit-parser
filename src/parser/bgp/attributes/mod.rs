@@ -212,12 +212,11 @@ pub fn parse_attributes(
             partial = true;
         }
 
-        debug!(
-            "reading attribute: type -- {:?}, length -- {}",
-            &attr_type, attr_length
-        );
-
         let parsed_attr_type = AttrType::from(attr_type);
+        debug!(
+            "BGP_ATTR: type={} ({:?}), length={}",
+            attr_type, parsed_attr_type, attr_length
+        );
 
         // RFC 7606: Check for duplicate attributes
         if seen_attributes[attr_type as usize] {

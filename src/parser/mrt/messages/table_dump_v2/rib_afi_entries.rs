@@ -5,7 +5,7 @@ use crate::models::{
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use log::warn;
+use log::{debug, warn};
 
 fn extract_afi_safi_from_rib_type(rib_type: &TableDumpV2Type) -> Result<(Afi, Safi), ParserError> {
     let afi: Afi;
@@ -61,6 +61,10 @@ pub fn parse_rib_afi_entries(
     let prefix = data.read_nlri_prefix(&afi, false)?;
 
     let entry_count = data.read_u16()?;
+    debug!(
+        "RIB_AFI: rib_type={:?}, prefix={}, entries={}",
+        rib_type, prefix, entry_count
+    );
     // Pre-allocate cautiously to avoid overflow/OOM with malformed inputs
     let min_entry_size =
         2 /*peer_index*/ + 4 /*time*/ + 2 /*attr_len*/ + if is_add_path { 4 } else { 0 };
@@ -131,6 +135,10 @@ pub fn parse_rib_entry(
     };
 
     let attribute_length = input.read_u16()? as usize;
+    debug!(
+        "RIB_ENTRY: prefix={}, peer_index={}, attr_len={}",
+        prefix, peer_index, attribute_length
+    );
 
     input.has_n_remaining(attribute_length)?;
     let attr_data_slice = input.split_to(attribute_length);

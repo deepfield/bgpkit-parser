@@ -510,10 +510,101 @@ impl Elementor {
                             });
                         }
                     }
-                    TableDumpV2Message::RibGeneric(_t) => {
-                        warn!(
-                            "to_elem for TableDumpV2Message::RibGenericEntries not yet implemented"
-                        );
+                    TableDumpV2Message::RibGeneric(t) => {
+                        let prefix = t.nlri;
+                        for e in t.rib_entries {
+                            let pid = e.peer_index;
+                            let peer = match self.peer_table.as_ref() {
+                                None => {
+                                    error!("peer_table is None");
+                                    break;
+                                }
+                                Some(table) => match table.get_peer_by_id(&pid) {
+                                    None => {
+                                        error!("peer ID {} not found in peer_index table", pid);
+                                        break;
+                                    }
+                                    Some(peer) => peer,
+                                },
+                            };
+                            let (
+                                as_path,
+                                as4_path,
+                                origin,
+                                next_hop,
+                                local_pref,
+                                med,
+                                communities,
+                                atomic,
+                                aggregator,
+                                announced,
+                                _withdrawn,
+                                only_to_customer,
+                                unknown,
+                                deprecated,
+                            ) = get_relevant_attributes(e.attributes);
+
+                            let path = match (as_path, as4_path) {
+                                (None, None) => None,
+                                (Some(v), None) => Some(v),
+                                (None, Some(v)) => Some(v),
+                                (Some(v1), Some(v2)) => {
+                                    Some(AsPath::merge_aspath_as4path(&v1, &v2))
+                                }
+                            };
+
+                            let next = match next_hop {
+                                None => {
+                                    if let Some(v) = announced {
+                                        if let Some(h) = v.next_hop {
+                                            match h {
+                                                NextHopAddress::Ipv4(v) => Some(IpAddr::from(v)),
+                                                NextHopAddress::Ipv6(v) => Some(IpAddr::from(v)),
+                                                NextHopAddress::Ipv6LinkLocal(v, _) => {
+                                                    Some(IpAddr::from(v))
+                                                }
+                                                NextHopAddress::VpnIpv6(_, v) => {
+                                                    Some(IpAddr::from(v))
+                                                }
+                                                NextHopAddress::VpnIpv6LinkLocal(_, v, _, _) => {
+                                                    Some(IpAddr::from(v))
+                                                }
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }
+                                Some(v) => Some(v),
+                            };
+
+                            let origin_asns = path
+                                .as_ref()
+                                .map(|as_path| as_path.iter_origins().collect());
+
+                            elems.push(BgpElem {
+                                timestamp: e.originated_time as f64,
+                                elem_type: ElemType::ANNOUNCE,
+                                peer_ip: peer.peer_ip,
+                                peer_asn: peer.peer_asn,
+                                prefix,
+                                next_hop: next,
+                                as_path: path,
+                                origin,
+                                origin_asns,
+                                local_pref,
+                                med,
+                                communities,
+                                atomic,
+                                aggr_asn: aggregator.map(|v| v.0),
+                                aggr_ip: aggregator.map(|v| v.1),
+                                only_to_customer,
+                                unknown,
+                                deprecated,
+                            });
+                        }
                     }
                     TableDumpV2Message::GeoPeerTable(_t) => {
                         // GeoPeerTable doesn't generate BGP elements, it provides geo-location context

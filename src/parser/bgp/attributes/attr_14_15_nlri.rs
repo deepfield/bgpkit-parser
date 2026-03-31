@@ -309,7 +309,8 @@ mod tests {
                     Ipv4Addr::from_str("192.0.2.1").unwrap()
                 ))
             );
-            let prefix = NetworkPrefix::new(IpNet::from_str("192.0.2.0/24").unwrap(), Some(123));
+            let prefix =
+                NetworkPrefix::new(IpNet::from_str("192.0.2.0/24").unwrap(), Some(123), None);
             assert_eq!(nlri.prefixes[0], prefix);
             assert_eq!(nlri.prefixes[0].path_id, prefix.path_id);
         } else {
@@ -328,6 +329,7 @@ mod tests {
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
+                rd: None,
             }],
             link_state_nlris: None,
             flowspec_nlris: None,
@@ -358,6 +360,7 @@ mod tests {
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: Some(123),
+                rd: None,
             }],
             link_state_nlris: None,
             flowspec_nlris: None,
@@ -416,6 +419,7 @@ mod tests {
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
+                rd: None,
             }],
             link_state_nlris: None,
             flowspec_nlris: None,
@@ -448,6 +452,7 @@ mod tests {
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
+                rd: None,
             }],
             link_state_nlris: None,
             flowspec_nlris: None,
