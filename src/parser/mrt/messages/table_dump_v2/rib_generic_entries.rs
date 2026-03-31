@@ -110,7 +110,8 @@ mod tests {
         assert_eq!(result.sequence_number, 1);
         assert_eq!(result.afi, Afi::Ipv4);
         assert_eq!(result.safi, Safi::MplsVpn);
-        assert!(result.nlri.rd.is_some());
+        let rd = result.nlri.rd.unwrap();
+        assert_eq!(rd.0, [0x00, 0x00, 0xFD, 0xE8, 0x00, 0x00, 0x00, 0x64]);
         assert_eq!(result.nlri.prefix.to_string(), "192.0.2.0/24");
         assert_eq!(result.rib_entries.len(), 0);
 
