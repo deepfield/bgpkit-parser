@@ -216,12 +216,9 @@ pub trait ReadUtils: Buf {
 
     /// Read VPN-IPv4 or VPN-IPv6 NLRI prefix (SAFI 128 - MPLS-labeled VPN).
     ///
-    /// Per RFC 4364 Section 4.2, VPN NLRI contains:
-    /// - MPLS label stack (3 bytes per label, typically 1-2 labels)
-    /// - Route Distinguisher (8 bytes)
-    /// - IP prefix (variable)
-    ///
-    /// The length field indicates total bits including label(s) + RD + prefix.
+    /// - [RFC 8277 Section 2](https://datatracker.ietf.org/doc/html/rfc8277#section-2): labeled NLRI encoding
+    /// - [RFC 4364 Section 4.1](https://datatracker.ietf.org/doc/html/rfc4364#section-4.1): VPN-IPv4 address family
+    /// - [RFC 4659 Section 3.2](https://datatracker.ietf.org/doc/html/rfc4659#section-3.2): VPN-IPv6 NLRI encoding
     fn read_vpn_nlri_prefix(
         &mut self,
         afi: &Afi,
